@@ -1,5 +1,5 @@
 # tiny-recursive-model-TRM
-PyTorch implementation of ["Less is More: Recursive Reasoning with Tiny Networks"](https://arxiv.org/abs/2510.04871)
+Paper implementation of ["Less is More: Recursive Reasoning with Tiny Networks"](https://arxiv.org/abs/2510.04871)
 
 ### Brief Overview
 TRM is a tiny (~7M parameters) neural network that solves complex reasoning tasks like Sudoku, maze pathfinding, and ARC-AGI puzzles by recursively refining its own answer, rather than relying on massive parameter counts or chain-of-thought token generation.
