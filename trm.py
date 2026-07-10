@@ -289,7 +289,7 @@ def create_trm_att(vocab_size, d_model=256, n_layers=4):
         n_layers=n_layers,
         n_reasoning_steps=8,
         n_refinement_steps=16,
-        use_attention=True  # Key difference!
+        use_attention=True
     )
 
 
@@ -312,6 +312,6 @@ def create_trm_mlp(vocab_size, d_model=256, n_layers=4):
         n_layers=n_layers,
         n_reasoning_steps=8,
         n_refinement_steps=16,
-        use_attention=False  # This is the magic!
+        use_attention=False
     )
     
