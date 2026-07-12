@@ -1,7 +1,7 @@
 import torch
 
 @torch.no_grad()
-def evaluate_accuracy(model, test_loader, device):
+def evaluate_accuracy(model, test_loader, device, latent_len=32):
     """
     Calculate accuracy on test set.
     
@@ -17,7 +17,7 @@ def evaluate_accuracy(model, test_loader, device):
         answers = answers.to(device)
         
         # Generate predictions
-        logits = model(questions, answers, latent_len=32)
+        logits = model(questions, answers, latent_len=latent_len)
         predictions = logits.argmax(dim=-1)
         
         # Calculate accuracy (ignore padding tokens)

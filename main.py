@@ -56,8 +56,7 @@ def main():
     # Data
     print(f"\n Loading data...")
     dataset = SudokuDataset(num_samples=100)  # Start with 100 for testing
-    # DEBUG: Check shapes
-    sample = dataset[0]
+    
     train_size = int(0.8 * len(dataset))
     val_size = len(dataset) - train_size
     train_dataset, val_dataset = torch.utils.data.random_split(dataset, [train_size, val_size]) # type: ignore
