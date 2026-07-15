@@ -1,5 +1,6 @@
 # tiny-recursive-model-TRM
 Paper implementation of ["Less is More: Recursive Reasoning with Tiny Networks"](https://arxiv.org/abs/2510.04871)
+
 Medium link for the paper review : https://medium.com/@MeriemDAHMANI/recursive-reasoning-with-tiny-networks-a-paper-review-7632daaeee85
 
 ### Brief Overview
