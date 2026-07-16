@@ -30,4 +30,19 @@ Example with warmup_steps=1000 and total_steps=50000 (so decay happens over 4900
 we use cosine because its derivative smoothly approaches zero near both endpoints (0 and 1),avoiding abrupt LR changes that would destabilize training
 ![alt text](image.png)
 
-Then we apply LambdaLR(optimizer, lr_lambda), which is a PyTorch scheduler that automatically adjusts the optimizer's learning rate by multiplying its base_lr by whatever value   lr_lambda(current_step) function returns , so it doesn't set the LR directly, but scales it based on training progress
+Then we apply LambdaLR(optimizer, lr_lambda), which is a PyTorch scheduler that automatically adjusts the optimizer's learning rate by multiplying its base_lr by whatever value lr_lambda(current_step) function returns , so it doesn't set the LR directly, but scales it based on training progress
+
+## function get_difficulty_config
+This function generates difficulty-level configurations that dynamically scale to any Sudoku board size. Instead of hardcoding cell counts for 9x9 puzzles, it calculates proportional masking ranges based on the total number of cells available (board_size * board_size)
+
+The function returns a dictionary with three difficulty levels:
+- **Easy**: Masks 25-35% of cells, leaving most of the puzzle visible for quick solving
+- **Medium**: Masks 40-55% of cells, requiring moderate logical deduction
+- **Hard**: Masks 60-75% of cells, demanding advanced solving techniques and backtracking
+
+Other difficulty techniques may be implemented in future versions, such as:
+
+- max_depth: The maximum number of consecutive decisions the solver must make before reaching a solution. Higher depth indicates puzzles requiring deeper logical reasoning chains
+- max_backtracks: The number of times the solver must backtrack when a choice leads to a contradiction. More backtracks indicate puzzles requiring extensive trial-and-error or constraint propagation
+
+
