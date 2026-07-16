@@ -196,7 +196,7 @@ class TRM(nn.Module):
         
         return (y, trajectory) if return_trajectory else y
     
-    def forward(self, question_ids, answer_ids=None, latent_len=32, mask=None):
+    def forward(self, question_ids, answer_ids=None, latent_len=32,answer_len=None, mask=None):
         """
         Complete forward pass.
         
@@ -218,9 +218,10 @@ class TRM(nn.Module):
         if answer_ids is not None:
             # Training: start with target answer embeddings
             y = self.embed_tokens(answer_ids)
+            len_a = answer_ids.size(1)  # Get actual length from data
         else:
             # Inference: start with random embeddings
-            len_a = 32  # default answer length
+            len_a = answer_len if answer_len is not None else 32
             y = torch.randn(batch_size, len_a, self.d_model, device=device) * 0.02
         
         # Step 3: Initialize reasoning (z stream) with random noise

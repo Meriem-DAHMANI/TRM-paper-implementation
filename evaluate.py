@@ -16,8 +16,10 @@ def evaluate_accuracy(model, test_loader, device, latent_len=32):
         questions = questions.to(device)
         answers = answers.to(device)
         
+        answer_len = answers.shape[1]
+        
         # Generate predictions
-        logits = model(questions, answers, latent_len=latent_len)
+        logits = model(questions, answer_ids=None, latent_len=latent_len, answer_len=answer_len)
         predictions = logits.argmax(dim=-1)
         
         # Calculate accuracy (ignore padding tokens)
