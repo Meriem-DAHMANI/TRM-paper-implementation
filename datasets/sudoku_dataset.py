@@ -107,7 +107,8 @@ class SudokuDataset(Dataset):
         return self.num_samples
     
     def __getitem__(self, idx):
-        puzzle = torch.tensor(self.puzzles[idx], dtype=torch.float32).unsqueeze(0)  # (1, 9, 9)
-        solution = torch.tensor(self.solutions[idx], dtype=torch.float32).unsqueeze(0)  # (1, 9, 9)
+        # Flattened token ids (Long) so they can go straight into nn.Embedding: (81,)
+        puzzle = torch.tensor(self.puzzles[idx].flatten(), dtype=torch.long)
+        solution = torch.tensor(self.solutions[idx].flatten(), dtype=torch.long)
         
         return puzzle, solution
