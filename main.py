@@ -17,7 +17,7 @@ from datasets.sudoku_dataset import SudokuDataset
 from datasets.sudoku_extreme_dataset import SudokuExtremeDataset, VOCAB_SIZE, SEQ_LEN
 
 
-def main(seed=0):
+def main(seed=0, block_style="classic"):
     # Seeded so runs are comparable to each other and to the official model's
     # `torch.random.manual_seed(config.seed)` in pretrain.py.
     torch.manual_seed(seed)
@@ -56,12 +56,12 @@ def main(seed=0):
 
     # Model
     print(f"\n Building model...")
-    model = create_trm_att(vocab_size, d_model, n_layers, n_latent_steps, n_cycles)
+    model = create_trm_att(vocab_size, d_model, n_layers, n_latent_steps, n_cycles, block_style=block_style)
     model = model.to(device)
 
     n_params = model.count_parameters()
     print(f"  Parameters: {n_params / 1e6:.3f}M")
-    print(f"  Model type: TRM-Att (with attention)")
+    print(f"  Model type: TRM-Att (with attention), block_style={block_style}")
 
     # Optimizer / scheduler / loss
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
@@ -131,4 +131,8 @@ def main(seed=0):
 
 
 if __name__ == "__main__":
-    main(seed=int(sys.argv[1]) if len(sys.argv) > 1 else 0)
+    # main.py [seed] [block_style]
+    main(
+        seed=int(sys.argv[1]) if len(sys.argv) > 1 else 0,
+        block_style=sys.argv[2] if len(sys.argv) > 2 else "classic",
+    )

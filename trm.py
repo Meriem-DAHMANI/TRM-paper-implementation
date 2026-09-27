@@ -29,6 +29,7 @@ class TRM(nn.Module):
         n_cycles=3,           # T: cycles per supervision step (only the last is backpropagated)
         max_latent_len=32,    # Length of the learned initial z
         mix_seq_len=None,     # TRM-MLP only: total length of the concatenated x,y,z sequence
+        block_style="classic",  # "classic" (LayerNorm+GELU) or "modern" (RMSNorm+SwiGLU)
         use_attention=True,   # False for TRM-MLP variant
         tie_embeddings=True   # Share input/output embeddings (saves params)
     ):
@@ -59,7 +60,7 @@ class TRM(nn.Module):
 
         # Stack of transformer blocks (2 in the paper)
         self.transformer_blocks = nn.ModuleList([
-            TransformerBlock(d_model, n_heads, d_ff, dropout, use_attention, mix_seq_len)
+            TransformerBlock(d_model, n_heads, d_ff, dropout, use_attention, mix_seq_len, block_style)
             for _ in range(n_layers)
         ])
         
@@ -279,13 +280,19 @@ class TRM(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
     
 
-def create_trm_att(vocab_size, d_model=256, n_layers=2, n_latent_steps=6, n_cycles=3):
+def create_trm_att(vocab_size, d_model=256, n_layers=2, n_latent_steps=6, n_cycles=3,
+                   block_style="classic"):
     """
     Create TRM-Att variant (with attention).
-    
+
     This is the "standard" transformer approach.
     Parameters: ~7M
     Best for: General reasoning tasks
+
+    block_style="modern" swaps LayerNorm+GELU for RMSNorm+SwiGLU (as in the
+    official TinyRecursiveModels repo), everything else unchanged. Used to
+    isolate how much of the accuracy gap with the official model comes from
+    the building blocks alone, vs. the x/y/z stream topology.
     """
     return TRM(
         vocab_size=vocab_size,
@@ -295,6 +302,7 @@ def create_trm_att(vocab_size, d_model=256, n_layers=2, n_latent_steps=6, n_cycl
         n_layers=n_layers,
         n_latent_steps=n_latent_steps,
         n_cycles=n_cycles,
+        block_style=block_style,
         use_attention=True
     )
 
