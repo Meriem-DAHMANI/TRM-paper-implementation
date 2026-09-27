@@ -3,27 +3,43 @@ import torch
 import torch.nn as nn
 from torch.cuda.amp import autocast, GradScaler
 
-def train_step_with_clipping(model, question_ids, answer_ids, optimizer, criterion):
+def train_step_with_clipping(model, question_ids, answer_ids, optimizer, criterion,
+                             n_sup_steps=4, latent_len=32):
     """
-    Training step with gradient clipping 
-    Why clip? With 24 recursive steps, gradients can grow exponentially
-    Clipping prevents NaN losses and training collapse
+    Deep supervision on one batch (as in the TRM paper).
+
+    We run the model n_sup_steps times on the same batch. After each step the
+    answer state y and latent state z are DETACHED and fed into the next step,
+    so the model learns to improve an answer that is already partly right.
+    Every step gets its own loss, backward pass and optimizer update.
+
+    answer_ids is only the loss target: the model never receives it as input.
+    Returns the loss of the last supervision step.
+
+    Why clip? Recursive updates can make gradients grow quickly.
+    Clipping prevents NaN losses and training collapse.
     """
     model.train()
-    optimizer.zero_grad()
-    
-    logits = model(question_ids, answer_ids, latent_len=32)
-    vocab_size = logits.size(-1)
-    loss = criterion(logits.reshape(-1, vocab_size), answer_ids.reshape(-1))
-    
-    loss.backward()
-    
-    # CRITICAL: Clip gradients before optimizer step
-    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
-    
-    optimizer.step()
-    
-    return loss.item()
+    state = None
+    loss_value = 0.0
+
+    for _ in range(n_sup_steps):
+        optimizer.zero_grad()
+
+        logits, state = model(question_ids, answer_ids, latent_len=latent_len,
+                              state=state, return_state=True)
+        vocab_size = logits.size(-1)
+        loss = criterion(logits.reshape(-1, vocab_size), answer_ids.reshape(-1))
+
+        loss.backward()
+
+        # CRITICAL: Clip gradients before optimizer step
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
+        optimizer.step()
+        loss_value = loss.item()
+
+    return loss_value
 
 def get_lr_scheduler(optimizer, warmup_steps=1000, total_steps=50000):
     """

@@ -32,6 +32,37 @@ def evaluate_accuracy(model, test_loader, device, latent_len=32):
 
 
 @torch.no_grad()
+def evaluate_metrics(model, test_loader, device, latent_len=32, n_sup_steps=4):
+    """
+    Per-cell accuracy AND exact accuracy (whole puzzle solved), in percent.
+    Exact accuracy is the metric the TRM paper reports for Sudoku.
+
+    Inference mirrors training: n_sup_steps supervision steps, carrying (y, z)
+    from one step to the next. The answers are never given to the model.
+    """
+    model.eval()
+    cells_correct = cells_total = puzzles_correct = puzzles_total = 0
+
+    for questions, answers in test_loader:
+        questions = questions.to(device)
+        answers = answers.to(device)
+
+        state = None
+        for _ in range(n_sup_steps):
+            logits, state = model(questions, latent_len=latent_len, answer_len=answers.shape[1],
+                                  state=state, return_state=True)
+        predictions = logits.argmax(dim=-1)
+
+        hits = predictions == answers
+        cells_correct += hits.sum().item()
+        cells_total += hits.numel()
+        puzzles_correct += hits.all(dim=-1).sum().item()
+        puzzles_total += hits.size(0)
+
+    return cells_correct / cells_total * 100, puzzles_correct / puzzles_total * 100
+
+
+@torch.no_grad()
 def generate_answer(model, question_text, tokenizer, device, max_length=50):
     """
     Generate an answer for a single question.
@@ -76,8 +107,8 @@ def visualize_reasoning_process(model, question_ids, answer_ids, device):
     
     # Get reasoning trajectory
     x = model.embed_tokens(question_ids.to(device))
-    y = model.embed_tokens(answer_ids.to(device))
-    z = torch.randn(1, 32, model.d_model, device=device) * 0.02
+    # Start from the learned initial state; answer_ids only gives the length
+    y, z = model.init_state(x.size(0), answer_ids.size(1), 32, device)
     
     y_final, trajectory = model.recursive_reasoning(
         x, y, z, return_trajectory=True

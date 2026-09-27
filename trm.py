@@ -25,16 +25,19 @@ class TRM(nn.Module):
         n_layers=4,           # Number of transformer blocks
         max_seq_len=512,      # Maximum sequence length
         dropout=0.1,          # Dropout probability
-        n_reasoning_steps=8,  # How many times to update z
-        n_refinement_steps=16,# How many times to update y
+        n_latent_steps=6,     # n: z updates per cycle, before each y update
+        n_cycles=3,           # T: cycles per supervision step (only the last is backpropagated)
+        max_latent_len=32,    # Length of the learned initial z
+        mix_seq_len=None,     # TRM-MLP only: total length of the concatenated x,y,z sequence
         use_attention=True,   # False for TRM-MLP variant
         tie_embeddings=True   # Share input/output embeddings (saves params)
     ):
         super().__init__()
-        
+
         self.d_model = d_model
-        self.n_reasoning_steps = n_reasoning_steps
-        self.n_refinement_steps = n_refinement_steps
+        self.n_latent_steps = n_latent_steps
+        self.n_cycles = n_cycles
+        self.max_latent_len = max_latent_len
         self.use_attention = use_attention
         
         # Token embeddings: converts token IDs to vectors
@@ -46,10 +49,17 @@ class TRM(nn.Module):
         self.position_embedding = nn.Embedding(max_seq_len, d_model)
         
         self.embedding_dropout = nn.Dropout(dropout)
-        
-        # Stack of transformer blocks (4x in the paper)
+
+        # Learned initial states. The starting y and z must NOT depend on the
+        # labels, so training and inference start from exactly the same place.
+        # y_init is shared by all answer cells (position embeddings tell them apart),
+        # z_init has one distinct vector per latent slot.
+        self.y_init = nn.Parameter(torch.randn(d_model) * 0.02)
+        self.z_init = nn.Parameter(torch.randn(max_latent_len, d_model) * 0.02)
+
+        # Stack of transformer blocks (2 in the paper)
         self.transformer_blocks = nn.ModuleList([
-            TransformerBlock(d_model, n_heads, d_ff, dropout, use_attention)
+            TransformerBlock(d_model, n_heads, d_ff, dropout, use_attention, mix_seq_len)
             for _ in range(n_layers)
         ])
         
@@ -152,90 +162,85 @@ class TRM(nn.Module):
         
         return x_new, y_new, z_new
     
-    def recursive_reasoning(self, x, y, z, mask=None, return_trajectory=False):
+    def refine(self, x, y, z, mask=None, trajectory=None):
         """
-        The heart of TRM: recursive reasoning.
-        
-        Phase 1 (8 steps): Build up reasoning in z
-        Phase 2 (16 steps): Refine answer in y
-        
-        This is like:
-        Phase 1: Reading and understanding the problem deeply
-        Phase 2: Working through the solution step by step
+        One supervision step of TRM (the heart of the paper).
+
+        A cycle is:
+            n_latent_steps updates of z   (think: z <- f(x, y, z))
+            then 1 update of y            (answer: y <- f(x, y, z))
+
+        We run n_cycles of them. The first n_cycles-1 run without gradients to
+        get a good (y, z); only the last cycle is backpropagated. This is much
+        cheaper in memory than backpropagating through every pass.
         """
-        trajectory = {'z_states': [], 'y_states': []} if return_trajectory else None
-        
-        # ===== PHASE 1: BUILD REASONING =====
-        print(f"Phase 1: Building reasoning ({self.n_reasoning_steps} steps)...")
-        for step in range(self.n_reasoning_steps):
-            # Process all three streams
-            x_new, y_new, z_new = self.forward_pass(x, y, z, mask)
-            
-            # ONLY UPDATE Z
-            # x stays fixed (question doesn't change)
-            # y stays fixed (not ready to answer yet)
-            # z gets updated (building understanding)
-            z = z_new
-            
-            if return_trajectory:
-                trajectory['z_states'].append(z.detach().clone())
-        
-        print(f"Phase 2: Refining answer ({self.n_refinement_steps} steps)...")
-        # ===== PHASE 2: REFINE ANSWER =====
-        for step in range(self.n_refinement_steps):
-            x_new, y_new, z_new = self.forward_pass(x, y, z, mask)
-            
-            # ONLY UPDATE Y
-            # x stays fixed (question doesn't change)
-            # z stays fixed (we've built our reasoning)
-            # y gets updated (refining our answer)
-            y = y_new
-            
-            if return_trajectory:
+        def cycle(y, z):
+            for _ in range(self.n_latent_steps):
+                _, _, z = self.forward_pass(x, y, z, mask)
+                if trajectory is not None:
+                    trajectory['z_states'].append(z.detach().clone())
+            _, y, _ = self.forward_pass(x, y, z, mask)
+            if trajectory is not None:
                 trajectory['y_states'].append(y.detach().clone())
-        
+            return y, z
+
+        with torch.no_grad():
+            for _ in range(self.n_cycles - 1):
+                y, z = cycle(y, z)
+        return cycle(y, z)
+
+    def recursive_reasoning(self, x, y, z, mask=None, return_trajectory=False):
+        """Run one supervision step; optionally record the z / y trajectory."""
+        trajectory = {'z_states': [], 'y_states': []} if return_trajectory else None
+        y, z = self.refine(x, y, z, mask, trajectory)
         return (y, trajectory) if return_trajectory else y
-    
-    def forward(self, question_ids, answer_ids=None, latent_len=32,answer_len=None, mask=None):
+
+    def init_state(self, batch_size, answer_len, latent_len, device):
         """
-        Complete forward pass.
-        
+        Starting (y, z). Learned parameters only: never the labels.
+        """
+        assert latent_len <= self.max_latent_len, \
+            f"latent_len={latent_len} exceeds max_latent_len={self.max_latent_len}"
+        positions = torch.arange(answer_len, device=device)
+        y = self.y_init + self.position_embedding(positions)          # [len_a, d]
+        y = y.unsqueeze(0).expand(batch_size, -1, -1)
+        z = self.z_init[:latent_len].unsqueeze(0).expand(batch_size, -1, -1)
+        return y, z
+
+    def forward(self, question_ids, answer_ids=None, latent_len=32, answer_len=None,
+                mask=None, state=None, return_state=False):
+        """
+        One supervision step.
+
         Args:
-            question_ids: Input question as token IDs [batch, len_q]
-            answer_ids: Target answer as token IDs [batch, len_a]
-            latent_len: Length of reasoning sequence (typically 32)
-        
+            question_ids: puzzle as token IDs [batch, len_q]
+            answer_ids:   ONLY used to read the answer length. The model never
+                          sees the answer contents (that was a label leak).
+            state:        (y, z) carried over from the previous supervision step,
+                          or None to start from the learned initial state.
+            return_state: also return the detached (y, z) to carry to the next step.
+
         Returns:
-            logits: Predicted tokens [batch, len_a, vocab_size]
+            logits [batch, len_a, vocab_size]  (and the new state if return_state)
         """
-        batch_size = question_ids.size(0)
-        device = question_ids.device
-        
-        # Step 1: Embed the question (x stream)
         x = self.embed_tokens(question_ids)
-        
-        # Step 2: Initialize or embed the answer (y stream)
-        if answer_ids is not None:
-            # Training: start with target answer embeddings
-            y = self.embed_tokens(answer_ids)
-            len_a = answer_ids.size(1)  # Get actual length from data
+
+        if state is None:
+            if answer_ids is not None:
+                answer_len = answer_ids.size(1)
+            elif answer_len is None:
+                answer_len = 32
+            y, z = self.init_state(question_ids.size(0), answer_len, latent_len, question_ids.device)
         else:
-            # Inference: start with random embeddings
-            len_a = answer_len if answer_len is not None else 32
-            y = torch.randn(batch_size, len_a, self.d_model, device=device) * 0.02
-        
-        # Step 3: Initialize reasoning (z stream) with random noise
-        # The model will learn what to put here!
-        z = torch.randn(batch_size, latent_len, self.d_model, device=device) * 0.02
-        
-        # Step 4: Do the recursive reasoning magic!
-        y_final = self.recursive_reasoning(x, y, z, mask)
-        
-        # Step 5: Convert final answer embeddings to token probabilities
-        logits = self.reverse_embedding(y_final)
-        
+            y, z = state
+
+        y, z = self.refine(x, y, z, mask)
+        logits = self.reverse_embedding(y)
+
+        if return_state:
+            return logits, (y.detach(), z.detach())
         return logits
-    
+
     def generate(self, question_ids, max_length=50, latent_len=32, temperature=1.0):
         """
         Generate an answer autoregressively.
@@ -274,7 +279,7 @@ class TRM(nn.Module):
         return sum(p.numel() for p in self.parameters() if p.requires_grad)
     
 
-def create_trm_att(vocab_size, d_model=256, n_layers=4):
+def create_trm_att(vocab_size, d_model=256, n_layers=2, n_latent_steps=6, n_cycles=3):
     """
     Create TRM-Att variant (with attention).
     
@@ -288,13 +293,14 @@ def create_trm_att(vocab_size, d_model=256, n_layers=4):
         n_heads=4,
         d_ff=d_model * 4,  # 256 * 4 = 1024
         n_layers=n_layers,
-        n_reasoning_steps=8,
-        n_refinement_steps=16,
+        n_latent_steps=n_latent_steps,
+        n_cycles=n_cycles,
         use_attention=True
     )
 
 
-def create_trm_mlp(vocab_size, d_model=256, n_layers=4):
+def create_trm_mlp(vocab_size, d_model=256, n_layers=2, n_latent_steps=6, n_cycles=3,
+                   mix_seq_len=81 + 81 + 32):
     """
     Create TRM-MLP variant (MLP-only, no attention).
     
@@ -311,8 +317,11 @@ def create_trm_mlp(vocab_size, d_model=256, n_layers=4):
         n_heads=4,  # Not used, but kept for compatibility
         d_ff=d_model * 4,
         n_layers=n_layers,
-        n_reasoning_steps=8,
-        n_refinement_steps=16,
+        n_latent_steps=n_latent_steps,
+        n_cycles=n_cycles,
+        # The MLP mixes across the sequence, so it needs the fixed length of the
+        # concatenated x,y,z: 81 (puzzle) + 81 (answer) + 32 (latent) for Sudoku.
+        mix_seq_len=mix_seq_len,
         use_attention=False
     )
     
