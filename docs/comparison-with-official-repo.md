@@ -51,8 +51,45 @@ Run with: `python main.py <seed> <block_style> <topology>`
 
 ### Results
 
-<!-- ABLATION_RESULTS_TABLE -->
+All runs: 200 train / 200 val Sudoku-Extreme puzzles (identical to the
+official-model comparison above), 20 epochs, 2000 optimizer steps.
+Val exact accuracy is 0.00% in every single run below, official model
+included, so only per-cell accuracy is shown.
+
+| topology | block_style | seed 0 | seed 1 |
+|---|---|---|---|
+| streams (original) | classic (original) | 11.16% | 11.18% |
+| streams | modern | 10.83% | 10.81% |
+| **carry** | classic | **40.59%** | **40.63%** |
+| **carry** | modern | **40.26%** | **40.54%** |
+
+For reference: the unmodified official model, on the identical data/seeds,
+scored 43.41% / 43.04% / 42.93% (3 seeds).
 
 ### Conclusion
 
-<!-- ABLATION_CONCLUSION -->
+**The x/y/z stream topology is the dominant cause of the gap. The building
+blocks (RMSNorm/SwiGLU vs LayerNorm/GELU) are not a meaningful factor.**
+
+- Switching only `block_style` (streams topology kept): 11.16% -> 10.81%,
+  i.e. no improvement, within seed noise.
+- Switching only `topology` (classic blocks kept): 11.16% -> 40.59%,
+  closing ~93% of the gap to the official model's ~43.1% average
+  (from a 32-point gap down to a ~2.5-point gap) by removing the separate
+  answer stream alone.
+- Combining both switches (carry + modern) does not improve on carry alone
+  (40.26-40.54% vs 40.59-40.63%): once the topology matches, the block type
+  makes no further difference at this scale.
+
+Concretely, what closes almost all of the gap is dropping the separate `y`
+sequence and its own set of positions, and instead injecting the question
+additively into a pair of carried states (h, z) that the same shared blocks
+update every step, exactly as the official model does. This repo's original
+design forces the network to spend capacity keeping a whole extra sequence
+in agreement with the question and the latent state, on top of solving the
+puzzle; removing that requirement is most of the story.
+
+The remaining ~2.5-point gap (40.5% vs 43.1%) is likely made up of the
+pieces this branch has not touched: RoPE, puzzle embeddings, ACT halting,
+`AdamATan2`, and the `stablemax` loss - each a plausible small contributor,
+none tested in isolation here.
