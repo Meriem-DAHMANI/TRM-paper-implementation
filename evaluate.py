@@ -104,12 +104,15 @@ def visualize_reasoning_process(model, question_ids, answer_ids, device):
     evolve over the 24 recursive steps!
     """
     model.eval()
-    
+    assert getattr(model, "topology", "streams") == "streams", (
+        "visualize_reasoning_process only supports the streams topology "
+        "(it inspects a separate y trajectory, which the carry topology doesn't have)")
+
     # Get reasoning trajectory
     x = model.embed_tokens(question_ids.to(device))
     # Start from the learned initial state; answer_ids only gives the length
     y, z = model.init_state(x.size(0), answer_ids.size(1), 32, device)
-    
+
     y_final, trajectory = model.recursive_reasoning(
         x, y, z, return_trajectory=True
     )

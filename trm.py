@@ -30,16 +30,22 @@ class TRM(nn.Module):
         max_latent_len=32,    # Length of the learned initial z
         mix_seq_len=None,     # TRM-MLP only: total length of the concatenated x,y,z sequence
         block_style="classic",  # "classic" (LayerNorm+GELU) or "modern" (RMSNorm+SwiGLU)
+        topology="streams",   # "streams" (this repo's x/y/z concat) or "carry" (official-style:
+                              # no separate y, x injected additively, answer read from h)
         use_attention=True,   # False for TRM-MLP variant
         tie_embeddings=True   # Share input/output embeddings (saves params)
     ):
         super().__init__()
+        assert topology in ("streams", "carry")
+        if topology == "carry":
+            assert use_attention, "carry topology needs attention (no MLP token-mixer support yet)"
 
         self.d_model = d_model
         self.n_latent_steps = n_latent_steps
         self.n_cycles = n_cycles
         self.max_latent_len = max_latent_len
         self.use_attention = use_attention
+        self.topology = topology
         
         # Token embeddings: converts token IDs to vectors
         # Example: token "hello" (ID: 42) -> 256-dim vector
@@ -57,6 +63,13 @@ class TRM(nn.Module):
         # z_init has one distinct vector per latent slot.
         self.y_init = nn.Parameter(torch.randn(d_model) * 0.02)
         self.z_init = nn.Parameter(torch.randn(max_latent_len, d_model) * 0.02)
+
+        # "carry" topology only: no separate y. h plays the official z_H (the
+        # state the answer is read from), z plays z_L (pure latent scratchpad).
+        # Both are the same length as x (per-cell), so position embeddings
+        # (shared with x/y) are enough to tell positions apart.
+        self.h_init = nn.Parameter(torch.randn(d_model) * 0.02)
+        self.z_carry_init = nn.Parameter(torch.randn(d_model) * 0.02)
 
         # Stack of transformer blocks (2 in the paper)
         self.transformer_blocks = nn.ModuleList([
@@ -208,6 +221,35 @@ class TRM(nn.Module):
         z = self.z_init[:latent_len].unsqueeze(0).expand(batch_size, -1, -1)
         return y, z
 
+    # ---- "carry" topology: no separate y stream (official-repo-style) ----
+
+    def init_carry(self, batch_size, seq_len, device):
+        """Starting (h, z), same length as x. Learned parameters only."""
+        pos = self.position_embedding(torch.arange(seq_len, device=device))
+        h = (self.h_init + pos).unsqueeze(0).expand(batch_size, -1, -1)
+        z = (self.z_carry_init + pos).unsqueeze(0).expand(batch_size, -1, -1)
+        return h, z
+
+    def carry_cycle(self, x, h, z, mask=None):
+        """
+        One cycle: n_latent_steps updates of z, then 1 update of h. Unlike the
+        "streams" topology, x is injected ADDITIVELY (not concatenated as
+        extra tokens), and z/h are updated by running the SAME shared
+        transformer blocks over a sequence no longer than x itself -- there is
+        no separate answer sequence to keep in sync with x and z.
+        """
+        for _ in range(self.n_latent_steps):
+            z = self.apply_transformer_blocks(z + h + x, mask)
+        h = self.apply_transformer_blocks(h + z, mask)
+        return h, z
+
+    def refine_carry(self, x, h, z, mask=None):
+        """Same n_cycles / detach-except-last-cycle rule as `refine`."""
+        with torch.no_grad():
+            for _ in range(self.n_cycles - 1):
+                h, z = self.carry_cycle(x, h, z, mask)
+        return self.carry_cycle(x, h, z, mask)
+
     def forward(self, question_ids, answer_ids=None, latent_len=32, answer_len=None,
                 mask=None, state=None, return_state=False):
         """
@@ -225,6 +267,20 @@ class TRM(nn.Module):
             logits [batch, len_a, vocab_size]  (and the new state if return_state)
         """
         x = self.embed_tokens(question_ids)
+
+        if self.topology == "carry":
+            # No separate answer stream: the answer length is always the
+            # question length (true for Sudoku, where input and output are
+            # both 81 cells), and the answer is read straight out of h.
+            if state is None:
+                h, z = self.init_carry(question_ids.size(0), question_ids.size(1), question_ids.device)
+            else:
+                h, z = state
+            h, z = self.refine_carry(x, h, z, mask)
+            logits = self.reverse_embedding(h)
+            if return_state:
+                return logits, (h.detach(), z.detach())
+            return logits
 
         if state is None:
             if answer_ids is not None:
@@ -281,7 +337,7 @@ class TRM(nn.Module):
     
 
 def create_trm_att(vocab_size, d_model=256, n_layers=2, n_latent_steps=6, n_cycles=3,
-                   block_style="classic"):
+                   block_style="classic", topology="streams"):
     """
     Create TRM-Att variant (with attention).
 
@@ -289,10 +345,12 @@ def create_trm_att(vocab_size, d_model=256, n_layers=2, n_latent_steps=6, n_cycl
     Parameters: ~7M
     Best for: General reasoning tasks
 
-    block_style="modern" swaps LayerNorm+GELU for RMSNorm+SwiGLU (as in the
-    official TinyRecursiveModels repo), everything else unchanged. Used to
-    isolate how much of the accuracy gap with the official model comes from
-    the building blocks alone, vs. the x/y/z stream topology.
+    Two independent ablation switches, for isolating what drives the accuracy
+    gap against the official TinyRecursiveModels repo on identical data:
+      block_style="modern"  - RMSNorm+SwiGLU instead of LayerNorm+GELU.
+      topology="carry"      - no separate y stream: x is injected additively
+                               into a carried (h, z) pair, and the answer is
+                               read straight out of h, as in the official model.
     """
     return TRM(
         vocab_size=vocab_size,
@@ -303,6 +361,7 @@ def create_trm_att(vocab_size, d_model=256, n_layers=2, n_latent_steps=6, n_cycl
         n_latent_steps=n_latent_steps,
         n_cycles=n_cycles,
         block_style=block_style,
+        topology=topology,
         use_attention=True
     )
 
