@@ -10,12 +10,31 @@ TRM is a tiny (~7M parameters) neural network that solves complex reasoning task
 
 The Tiny Recursion Model (TRM) iteratively refines its predicted answer y using a compact neural network. It begins with the embedded input question x, an initial embedded answer y, and a latent representation z. At each step, it first recursively updates the latent state z n times based on the question x, the current answer y, and the existing latent state z (recursive reasoning). It then updates the answer y using the refined latent state together with the current answer. Through this iterative process, the model progressively enhances its predictions, correcting earlier mistakes when possible, while remaining highly parameter-efficient and reducing the risk of overfitting.
 
-### Status
+### Getting started
 
-Trained and evaluated on real [Sudoku-Extreme](https://huggingface.co/datasets/sapientinc/sudoku-extreme) puzzles, compared side by side against the [official implementation](https://github.com/SamsungSAILMontreal/TinyRecursiveModels). Full results and how to reproduce them: [`docs/comparison-with-official-repo.md`](docs/comparison-with-official-repo.md). For how these results relate to the paper's numbers and testing conditions, see [`docs/paper-vs-implementation.md`](docs/paper-vs-implementation.md).
+**1. Install**
+```bash
+pip install -r requirements.txt
+```
 
-Two experimental switches were added to `trm.py` (`create_trm_att(..., block_style=..., topology=...)`) to find out why this implementation scored much lower than the official one on identical data:
-- `block_style`: `"modern"` (default — RMSNorm+SwiGLU, as in the paper and official repo) or `"classic"` (this repo's original LayerNorm+GELU).
-- `topology`: `"streams"` (default — this repo's original design, y as its own sequence) or `"carry"` (no separate y; the question is injected directly into two carried states, as in the official model).
+**2. Build the dataset**
 
-Result: `topology` explains almost all of the gap, `block_style` explains none of it.
+This repo uses the same Sudoku-Extreme data files as the official code, built with the official repo's script. Clone the official repo **next to this one**:
+```
+Coding/
+├── tiny-recursive-model-TRM-/
+└── TinyRecursiveModels/
+```
+Then build the data from inside `TinyRecursiveModels/` (its own `requirements.txt` lists the dependencies):
+```bash
+python dataset/build_sudoku_dataset.py --output-dir data/sudoku-extreme-1k --subsample-size 1000 --num-aug 0
+```
+
+**3. Train and evaluate**
+```bash
+python main.py <seed> <block_style> <topology>
+
+# Configuration used for the results above
+python main.py 0 classic carry
+```
+The script trains for 20 epochs and prints per-cell and exact accuracy every 5 epochs. The best model is saved to `best_trm_model.pt`. Other settings (model size, number of puzzles, recursion steps, ...) are at the top of `main()` in `main.py`.
