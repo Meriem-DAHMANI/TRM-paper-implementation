@@ -33,7 +33,6 @@ pip install -r requirements.txt
 
 This repo uses the same Sudoku-Extreme data files as the official code, built with the official repo's script. Clone the official repo **next to this one**:
 ```
-Coding/
 ├── tiny-recursive-model-TRM-/
 └── TinyRecursiveModels/
 ```
