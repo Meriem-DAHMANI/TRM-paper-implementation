@@ -8,6 +8,10 @@ All results are on Sudoku-Extreme.
 | Per-cell accuracy | not reported | ~43.1% | ~40.6% |
 | Exact accuracy (whole puzzle solved) | 74.7% (Att) / 87.4% (MLP) | 0% | 0% |
 
+**Per-cell accuracy** scores the output at the level of individual cells, calculating the fraction of cells that match the target and averaging across all examples.
+
+**Exact accuracy** is the strictest way to score a model on tasks that produce structured outputs like grids or tables. A prediction counts as correct only if every single cell matches the target, so one wrong cell means the whole example scores zero.
+
 The official code and this repo were trained and evaluated under identical
 conditions (same puzzles, batch size, step count and seeds), so their results
 are directly comparable. Neither is directly comparable with the paper, which
