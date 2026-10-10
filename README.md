@@ -48,4 +48,10 @@ python main.py <seed> <block_style> <topology>
 # Configuration used for the results above
 python main.py 0 classic carry
 ```
+| Argument | Possible values | Default |
+|---|---|---|
+| seed | any integer | 0 |
+| block_style | modern (RMSNorm + SwiGLU, as in the paper), classic (LayerNorm + GELU) | modern |
+| topology | carry (as in the official code), streams (this repo's first design) | streams |
+
 The script trains for 20 epochs and prints per-cell and exact accuracy every 5 epochs. The best model is saved to `best_trm_model.pt`. Other settings (model size, number of puzzles, recursion steps, ...) are at the top of `main()` in `main.py`.
