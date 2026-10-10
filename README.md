@@ -12,10 +12,10 @@ The Tiny Recursion Model (TRM) iteratively refines its predicted answer y using 
 
 ### Status
 
-Trained and evaluated on real [Sudoku-Extreme](https://huggingface.co/datasets/sapientinc/sudoku-extreme) puzzles, compared side by side against the [official implementation](https://github.com/SamsungSAILMontreal/TinyRecursiveModels). Full results and how to reproduce them: [`docs/comparison-with-official-repo.md`](docs/comparison-with-official-repo.md).
+Trained and evaluated on real [Sudoku-Extreme](https://huggingface.co/datasets/sapientinc/sudoku-extreme) puzzles, compared side by side against the [official implementation](https://github.com/SamsungSAILMontreal/TinyRecursiveModels). Full results and how to reproduce them: [`docs/comparison-with-official-repo.md`](docs/comparison-with-official-repo.md). For how these results relate to the paper's numbers and testing conditions, see [`docs/paper-vs-implementation.md`](docs/paper-vs-implementation.md).
 
 Two experimental switches were added to `trm.py` (`create_trm_att(..., block_style=..., topology=...)`) to find out why this implementation scored much lower than the official one on identical data:
-- `block_style`: `"classic"` (this repo's original LayerNorm+GELU) or `"modern"` (RMSNorm+SwiGLU, as in the official repo).
+- `block_style`: `"modern"` (default — RMSNorm+SwiGLU, as in the paper and official repo) or `"classic"` (this repo's original LayerNorm+GELU).
 - `topology`: `"streams"` (default — this repo's original design, y as its own sequence) or `"carry"` (no separate y; the question is injected directly into two carried states, as in the official model).
 
 Result: `topology` explains almost all of the gap, `block_style` explains none of it.

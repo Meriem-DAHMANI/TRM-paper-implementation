@@ -29,7 +29,7 @@ class TRM(nn.Module):
         n_cycles=3,           # T: cycles per supervision step (only the last is backpropagated)
         max_latent_len=32,    # Length of the learned initial z
         mix_seq_len=None,     # TRM-MLP only: total length of the concatenated x,y,z sequence
-        block_style="classic",  # "classic" (LayerNorm+GELU) or "modern" (RMSNorm+SwiGLU)
+        block_style="modern",   # "modern" (RMSNorm+SwiGLU, as in the paper) or "classic" (LayerNorm+GELU)
         topology="streams",   # "streams" (this repo's x/y/z concat) or "carry" (official-style:
                               # x, y, z added per cell instead of concatenated)
         use_attention=True,   # False for TRM-MLP variant
@@ -339,7 +339,7 @@ class TRM(nn.Module):
     
 
 def create_trm_att(vocab_size, d_model=256, n_layers=2, n_latent_steps=6, n_cycles=3,
-                   block_style="classic", topology="streams"):
+                   block_style="modern", topology="streams"):
     """
     Create TRM-Att variant (with attention).
 
@@ -349,7 +349,7 @@ def create_trm_att(vocab_size, d_model=256, n_layers=2, n_latent_steps=6, n_cycl
 
     Two independent ablation switches, for isolating what drives the accuracy
     gap against the official TinyRecursiveModels repo on identical data:
-      block_style="modern"  - RMSNorm+SwiGLU instead of LayerNorm+GELU.
+      block_style="classic" - LayerNorm+GELU instead of RMSNorm+SwiGLU (default "modern").
       topology="carry"      - y is not a separate stream: x is injected additively
                                into a carried (y, z) pair, and the answer is
                                read straight out of y, as in the official model.

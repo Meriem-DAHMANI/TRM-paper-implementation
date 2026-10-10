@@ -17,7 +17,7 @@ from datasets.sudoku_dataset import SudokuDataset
 from datasets.sudoku_extreme_dataset import SudokuExtremeDataset, VOCAB_SIZE, SEQ_LEN
 
 
-def main(seed=0, block_style="classic", topology="streams"):
+def main(seed=0, block_style="modern", topology="streams"):
     # Seeded so runs are comparable to each other and to the official model's
     # `torch.random.manual_seed(config.seed)` in pretrain.py.
     torch.manual_seed(seed)
@@ -135,6 +135,6 @@ if __name__ == "__main__":
     # main.py [seed] [block_style] [topology]
     main(
         seed=int(sys.argv[1]) if len(sys.argv) > 1 else 0,
-        block_style=sys.argv[2] if len(sys.argv) > 2 else "classic",
+        block_style=sys.argv[2] if len(sys.argv) > 2 else "modern",
         topology=sys.argv[3] if len(sys.argv) > 3 else "streams",
     )

@@ -39,14 +39,13 @@ class TransformerBlock(nn.Module):
     """
     
     def __init__(self, d_model, n_heads, d_ff, dropout=0.1, use_attention=True, mix_seq_len=None,
-                 block_style="classic"):
+                 block_style="modern"):
         """
         block_style:
-            "classic" (default) - this repo's original blocks: GELU FeedForward + LayerNorm.
-            "modern"             - official-TRM-style blocks: SwiGLU + RMSNorm, same topology
-                                    otherwise. Used to test how much of the accuracy gap with
-                                    the official model comes from the building blocks alone,
-                                    keeping this repo's x/y/z concatenation unchanged.
+            "modern" (default) - paper / official-TRM blocks: SwiGLU + RMSNorm.
+            "classic"          - this repo's original blocks: GELU FeedForward + LayerNorm.
+                                  Kept for the ablation: on identical data it scores within
+                                  seed noise of "modern" (see docs/comparison-with-official-repo.md).
         """
         super().__init__()
         self.use_attention = use_attention  # False for TRM-MLP variant
