@@ -44,8 +44,9 @@ commit) to test hypotheses one at a time, everything else held fixed:
   `"modern"` (RMSNorm + SwiGLU, as in the official repo).
 - `topology`: `"streams"` (this repo's original: x, y, z concatenated into
   one sequence, y is a separate stream) vs `"carry"` (official-repo-style: no
-  separate y; only two carried states h, z; x is injected additively into z
-  at every latent step; the answer is read directly out of h).
+  separate y stream; y and z are per-cell carried states, the same length
+  as x; x is injected additively into z at every latent step; the answer is
+  read directly out of y. The official code calls y and z `z_H` and `z_L`).
 
 Run with: `python main.py <seed> <block_style> <topology>`
 
@@ -83,7 +84,7 @@ blocks (RMSNorm/SwiGLU vs LayerNorm/GELU) are not a meaningful factor.**
 
 Concretely, what closes almost all of the gap is dropping the separate `y`
 sequence and its own set of positions, and instead injecting the question
-additively into a pair of carried states (h, z) that the same shared blocks
+additively into a pair of carried states (y, z) that the same shared blocks
 update every step, exactly as the official model does. This repo's original
 design forces the network to spend capacity keeping a whole extra sequence
 in agreement with the question and the latent state, on top of solving the

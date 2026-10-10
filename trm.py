@@ -31,7 +31,7 @@ class TRM(nn.Module):
         mix_seq_len=None,     # TRM-MLP only: total length of the concatenated x,y,z sequence
         block_style="classic",  # "classic" (LayerNorm+GELU) or "modern" (RMSNorm+SwiGLU)
         topology="streams",   # "streams" (this repo's x/y/z concat) or "carry" (official-style:
-                              # no separate y, x injected additively, answer read from h)
+                              # x, y, z added per cell instead of concatenated)
         use_attention=True,   # False for TRM-MLP variant
         tie_embeddings=True   # Share input/output embeddings (saves params)
     ):
@@ -64,11 +64,11 @@ class TRM(nn.Module):
         self.y_init = nn.Parameter(torch.randn(d_model) * 0.02)
         self.z_init = nn.Parameter(torch.randn(max_latent_len, d_model) * 0.02)
 
-        # "carry" topology only: no separate y. h plays the official z_H (the
-        # state the answer is read from), z plays z_L (pure latent scratchpad).
-        # Both are the same length as x (per-cell), so position embeddings
-        # (shared with x/y) are enough to tell positions apart.
-        self.h_init = nn.Parameter(torch.randn(d_model) * 0.02)
+        # "carry" topology only. y is the paper's answer state (official code:
+        # z_H), z is the paper's latent (official code: z_L). Both are the same
+        # length as x (one vector per cell), so position embeddings (shared
+        # with x) are enough to tell positions apart.
+        self.y_carry_init = nn.Parameter(torch.randn(d_model) * 0.02)
         self.z_carry_init = nn.Parameter(torch.randn(d_model) * 0.02)
 
         # Stack of transformer blocks (2 in the paper)
@@ -221,34 +221,36 @@ class TRM(nn.Module):
         z = self.z_init[:latent_len].unsqueeze(0).expand(batch_size, -1, -1)
         return y, z
 
-    # ---- "carry" topology: no separate y stream (official-repo-style) ----
+    # ---- "carry" topology: x, y, z added per cell (official-repo-style) ----
 
     def init_carry(self, batch_size, seq_len, device):
-        """Starting (h, z), same length as x. Learned parameters only."""
+        """Starting (y, z), same length as x. Learned parameters only."""
         pos = self.position_embedding(torch.arange(seq_len, device=device))
-        h = (self.h_init + pos).unsqueeze(0).expand(batch_size, -1, -1)
+        y = (self.y_carry_init + pos).unsqueeze(0).expand(batch_size, -1, -1)
         z = (self.z_carry_init + pos).unsqueeze(0).expand(batch_size, -1, -1)
-        return h, z
+        return y, z
 
-    def carry_cycle(self, x, h, z, mask=None):
+    def carry_cycle(self, x, y, z, mask=None):
         """
-        One cycle: n_latent_steps updates of z, then 1 update of h. Unlike the
-        "streams" topology, x is injected ADDITIVELY (not concatenated as
-        extra tokens), and z/h are updated by running the SAME shared
-        transformer blocks over a sequence no longer than x itself -- there is
-        no separate answer sequence to keep in sync with x and z.
+        One cycle, as in the paper's pseudocode:
+            z = net(x, y, z)   n_latent_steps times
+            y = net(y, z)      once (no x, so the net knows to update the answer)
+        Unlike the "streams" topology, x, y, z are ADDED per cell (not
+        concatenated as extra tokens), so the SAME shared transformer blocks
+        run over a sequence no longer than x itself -- there is no separate
+        answer sequence to keep in sync with x and z.
         """
         for _ in range(self.n_latent_steps):
-            z = self.apply_transformer_blocks(z + h + x, mask)
-        h = self.apply_transformer_blocks(h + z, mask)
-        return h, z
+            z = self.apply_transformer_blocks(z + y + x, mask)
+        y = self.apply_transformer_blocks(y + z, mask)
+        return y, z
 
-    def refine_carry(self, x, h, z, mask=None):
+    def refine_carry(self, x, y, z, mask=None):
         """Same n_cycles / detach-except-last-cycle rule as `refine`."""
         with torch.no_grad():
             for _ in range(self.n_cycles - 1):
-                h, z = self.carry_cycle(x, h, z, mask)
-        return self.carry_cycle(x, h, z, mask)
+                y, z = self.carry_cycle(x, y, z, mask)
+        return self.carry_cycle(x, y, z, mask)
 
     def forward(self, question_ids, answer_ids=None, latent_len=32, answer_len=None,
                 mask=None, state=None, return_state=False):
@@ -269,17 +271,17 @@ class TRM(nn.Module):
         x = self.embed_tokens(question_ids)
 
         if self.topology == "carry":
-            # No separate answer stream: the answer length is always the
+            # y is not a separate stream: the answer length is always the
             # question length (true for Sudoku, where input and output are
-            # both 81 cells), and the answer is read straight out of h.
+            # both 81 cells), and the answer is read straight out of y.
             if state is None:
-                h, z = self.init_carry(question_ids.size(0), question_ids.size(1), question_ids.device)
+                y, z = self.init_carry(question_ids.size(0), question_ids.size(1), question_ids.device)
             else:
-                h, z = state
-            h, z = self.refine_carry(x, h, z, mask)
-            logits = self.reverse_embedding(h)
+                y, z = state
+            y, z = self.refine_carry(x, y, z, mask)
+            logits = self.reverse_embedding(y)
             if return_state:
-                return logits, (h.detach(), z.detach())
+                return logits, (y.detach(), z.detach())
             return logits
 
         if state is None:
@@ -348,9 +350,9 @@ def create_trm_att(vocab_size, d_model=256, n_layers=2, n_latent_steps=6, n_cycl
     Two independent ablation switches, for isolating what drives the accuracy
     gap against the official TinyRecursiveModels repo on identical data:
       block_style="modern"  - RMSNorm+SwiGLU instead of LayerNorm+GELU.
-      topology="carry"      - no separate y stream: x is injected additively
-                               into a carried (h, z) pair, and the answer is
-                               read straight out of h, as in the official model.
+      topology="carry"      - y is not a separate stream: x is injected additively
+                               into a carried (y, z) pair, and the answer is
+                               read straight out of y, as in the official model.
     """
     return TRM(
         vocab_size=vocab_size,
