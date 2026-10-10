@@ -20,7 +20,7 @@ Trained and evaluated on [Sudoku-Extreme](https://huggingface.co/datasets/sapien
 | Per-cell accuracy | not reported | ~43.1% | ~40.6% |
 | Exact accuracy (whole puzzle solved) | 74.7% (Att) / 87.4% (MLP) | 0% | 0% |
 
-The official code and this repo were trained and evaluated under identical conditions (same puzzles, batch size, step count and seeds), so their results are directly comparable. Neither is directly comparable with the paper because these runs use a much smaller setup than the paper's. For more details check docs/result.md
+The official code and this repo were trained and evaluated under identical conditions (same puzzles, batch size, step count and seeds), so their results are directly comparable. Neither is directly comparable with the paper because these runs use a much smaller setup than the paper's. For more details check **docs/result.md**
 
 ### Getting started
 
