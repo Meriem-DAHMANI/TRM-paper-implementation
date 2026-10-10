@@ -10,6 +10,18 @@ TRM is a tiny (~7M parameters) neural network that solves complex reasoning task
 
 The Tiny Recursion Model (TRM) iteratively refines its predicted answer y using a compact neural network. It begins with the embedded input question x, an initial embedded answer y, and a latent representation z. At each step, it first recursively updates the latent state z n times based on the question x, the current answer y, and the existing latent state z (recursive reasoning). It then updates the answer y using the refined latent state together with the current answer. Through this iterative process, the model progressively enhances its predictions, correcting earlier mistakes when possible, while remaining highly parameter-efficient and reducing the risk of overfitting.
 
+
+### Results
+
+Trained and evaluated on [Sudoku-Extreme](https://huggingface.co/datasets/sapientinc/sudoku-extreme), and compared with the [official implementation](https://github.com/SamsungSAILMontreal/TinyRecursiveModels) under identical conditions (200 training puzzles, 200 test puzzles, 2,000 optimizer steps).
+
+| | Paper | Official code (reproduced) | This repo |
+|---|---|---|---|
+| Per-cell accuracy | not reported | ~43.1% | ~40.6% |
+| Exact accuracy (whole puzzle solved) | 74.7% (Att) / 87.4% (MLP) | 0% | 0% |
+
+The official code and this repo were trained and evaluated under identical conditions (same puzzles, batch size, step count and seeds), so their results are directly comparable. Neither is directly comparable with the paper because these runs use a much smaller setup than the paper's. For more details check docs/result.md
+
 ### Getting started
 
 **1. Install**
